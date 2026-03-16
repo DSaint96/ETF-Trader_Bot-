@@ -1,23 +1,21 @@
-# Solana Memecoin Trading Bot
+# ETF Trading Bot — Schwab API
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue?style=flat-square&logo=python)
-![Solana](https://img.shields.io/badge/Blockchain-Solana-9945FF?style=flat-square)
-![Status](https://img.shields.io/badge/Status-Phase%201%20%7C%20Paper%20Trading-yellow?style=flat-square)
+![Status](https://img.shields.io/badge/Status-Active%20%7C%20Dry%20Run-green?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square)
 
-A Python-based trading bot for Solana memecoins that monitors live market data via the **Birdeye API**, identifies momentum-based entry signals, and executes trades through a **Phantom wallet** connection. Built with a full **paper trading simulation mode** to validate logic before any real capital is deployed.
+An automated ETF price-monitoring and trading bot built in Python, integrated with the **Charles Schwab brokerage REST API**. The bot authenticates via OAuth 2.0, checks live prices on a configurable schedule, and fires buy orders when ETF prices drop below defined trigger thresholds — all with a safe **dry-run mode** for testing without real capital.
 
 ---
 
 ## Features
 
-- **Real-time price & volume monitoring** — pulls live data from Birdeye API across multiple Solana token pairs
-- **Momentum signal detection** — triggers on configurable volume spike + price % change thresholds
-- **Automated stop-loss & take-profit** — bot exits positions automatically to protect capital
-- **Paper trading mode** — simulates full trade lifecycle with P&L tracking and zero real funds
-- **Trade log** — every signal, entry, and exit is written to a structured CSV log
-- **Wallet integration** — connects to Phantom wallet via Solana web3 for live execution (Phase 3)
-- **Rug pull protections** — contract blocklist, max position size cap, and liquidity checks
+- **OAuth 2.0 authentication** — handles token refresh automatically and persists tokens to a local JSON file
+- **Scheduled price monitoring** — checks prices every 30 minutes using APScheduler
+- **Configurable trigger prices** — set custom buy-in targets per ETF (VOO, JEPQ, QQQ)
+- **Dry-run mode** — simulates all actions with full logging and zero real trades
+- **Structured logging** — every check, error, and trade is logged with timestamps to `trader.log`
+- **Error handling** — graceful recovery from network failures and API timeouts
 
 ---
 
@@ -26,12 +24,11 @@ A Python-based trading bot for Solana memecoins that monitors live market data v
 | Tool | Purpose |
 |---|---|
 | Python 3.10+ | Core language |
-| `solana-py` | Solana blockchain interaction |
-| `solders` | Solana transaction building |
-| Birdeye API | Real-time Solana token price/volume data |
-| Jupiter Aggregator API | Best-price swap routing |
-| `pandas` | Trade log analysis |
+| `schwab-py` | Schwab API client library |
+| `APScheduler` | Job scheduling |
+| `requests` | HTTP client for API calls |
 | `logging` | Structured event logging |
+| `json` | Token persistence |
 
 ---
 
@@ -39,26 +36,17 @@ A Python-based trading bot for Solana memecoins that monitors live market data v
 
 ```
 Startup
-  └── Connect to Solana RPC endpoint
-  └── Load watchlist of token addresses
-  └── Initialize paper trading ledger
+  └── Load OAuth token from schwab_token.json
+  └── Authenticate with Schwab API
 
-Every 60 seconds
-  └── Fetch price + volume for each token (Birdeye API)
-  └── Check momentum signal:
-      ├── Volume spike > 200% of 10-min average?
-      └── Price change > +5% in last 5 minutes?
-          └── NO  → continue watching
-          └── YES → check rug pull filters
-              ├── Token on blocklist? → SKIP
-              ├── Liquidity < $10k?   → SKIP
-              └── PASS → fire BUY signal
-                  ├── [Paper mode] → log simulated buy, track P&L
-                  └── [Live mode]  → route swap via Jupiter, sign with Phantom
-
-Position monitoring (every 30 seconds)
-  └── Price DOWN 25% → STOP LOSS  → sell
-  └── Price UP 50%  → TAKE PROFIT → sell
+Every 30 minutes
+  └── Refresh token if expired
+  └── Fetch live quote for VOO, JEPQ, QQQ
+  └── Compare current price vs. trigger price
+      ├── Price ABOVE trigger → log "watching", do nothing
+      └── Price AT or BELOW trigger → log "trigger fired"
+          └── [Dry run] → log simulated buy
+          └── [Live mode] → execute market buy order
 ```
 
 ---
@@ -67,8 +55,8 @@ Position monitoring (every 30 seconds)
 
 ### 1. Clone the repo
 ```bash
-git clone https://github.com/DSaint96/solana-memecoin-bot.git
-cd solana-memecoin-bot
+git clone https://github.com/DSaint96/etf-trading-bot.git
+cd etf-trading-bot
 ```
 
 ### 2. Install dependencies
@@ -76,80 +64,65 @@ cd solana-memecoin-bot
 pip install -r requirements.txt
 ```
 
-### 3. Configure API keys
-Create a `.env` file:
+### 3. Configure your credentials
+Create a `.env` file in the root directory:
 ```
-BIRDEYE_API_KEY=your_birdeye_api_key
-SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
-WALLET_PRIVATE_KEY=your_phantom_private_key
+SCHWAB_CLIENT_ID=your_client_id
+SCHWAB_CLIENT_SECRET=your_client_secret
 ```
 
-> ⚠️ **Never commit your `.env` file or private key to GitHub.** Add `.env` to your `.gitignore`.
-
-### 4. Configure trading parameters
-Edit `config.py`:
+### 4. Set your trigger prices
+Edit the `config` section in `schwab_trader.py`:
 ```python
-PAPER_TRADING         = True   # Set False for live mode
-MAX_POSITION_SIZE_USD = 5.00   # Max $ per trade
-STOP_LOSS_PCT         = 0.25   # Exit if down 25%
-TAKE_PROFIT_PCT       = 0.50   # Exit if up 50%
-VOLUME_SPIKE_MULT     = 2.0    # Volume trigger multiplier
-PRICE_CHANGE_MIN_PCT  = 5.0    # Min % move to trigger
+TRIGGERS = {
+    "VOO":  450.00,
+    "JEPQ": 48.00,
+    "QQQ":  430.00,
+}
+DRY_RUN = True  # Set to False for live trading
 ```
 
 ### 5. Run the bot
 ```bash
-python memecoin_bot.py
+python schwab_trader.py
 ```
 
 ---
 
-## Sample Trade Log
+## Sample Log Output
 
 ```
-timestamp,token,action,price_usd,amount_usd,pnl_usd,reason
-2026-03-14 10:12:05,BONK,BUY,0.00001823,5.00,,momentum signal
-2026-03-14 10:38:47,BONK,SELL,0.00002710,7.43,+2.43,take profit hit
-2026-03-14 11:05:22,WIF,BUY,2.1840,5.00,,momentum signal
-2026-03-14 11:19:08,WIF,SELL,1.6380,3.75,-1.25,stop loss hit
+2026-03-13 09:36:02 [INFO] Scheduler started. dry_run=ON
+2026-03-13 09:36:04 [INFO] VOO: current=$615.49, trigger=$450.00
+2026-03-13 09:36:04 [INFO] JEPQ: current=$57.05, trigger=$48.00
+2026-03-13 09:36:05 [INFO] QQQ: current=$599.29, trigger=$430.00
 ```
 
 ---
 
-## Project Phases
+## Project Status
 
-| Phase | Description | Status |
-|---|---|---|
-| Phase 1 | Paper trading engine + Birdeye API integration | 🔄 In progress |
-| Phase 2 | Signal tuning + rug pull filter refinement | 🔜 Planned |
-| Phase 3 | Live wallet integration + Jupiter swap execution | 🔜 Planned |
-| Phase 4 | Multi-token monitoring + performance dashboard | 🔜 Planned |
-
----
-
-## Risk Controls
-
-| Control | Value | Purpose |
-|---|---|---|
-| Max position size | $5.00 | Caps loss per trade |
-| Stop-loss | −25% | Auto-exits losing trades |
-| Take-profit | +50% | Locks in gains |
-| Liquidity check | > $10,000 | Filters low-liquidity tokens |
-| Contract blocklist | Maintained manually | Blocks known scam tokens |
-| Paper mode default | `True` | Prevents accidental live trades |
+| Phase | Status |
+|---|---|
+| OAuth 2.0 authentication | ✅ Complete |
+| Scheduled price monitoring | ✅ Complete |
+| Dry-run mode | ✅ Complete |
+| Live trade execution | 🔄 In progress |
+| Dashboard visualization | ✅ Complete (Chart.js) |
+| Email/SMS alert on trigger | 🔜 Planned |
 
 ---
 
 ## Skills Demonstrated
 
-`Python` `Blockchain Development` `Solana Web3` `REST APIs` `Real-Time Data Processing` `Algorithmic Trading Logic` `Risk Management` `Wallet Integration` `pandas` `Environment Variables`
+`Python` `REST APIs` `OAuth 2.0` `API Authentication` `Task Scheduling` `Error Handling` `Logging` `Financial Automation` `JSON` `Environment Variables`
 
 ---
 
 ## Disclaimer
 
-This project is for educational and portfolio purposes only. Memecoin trading carries extreme financial risk. Always run paper trading mode before deploying real funds. This is not financial advice.
+This project is for educational and portfolio purposes. This is not financial advice. Always use dry-run mode before committing real capital.
 
 ---
 
-*Built by [Dennis Saint](https://github.com/DSaint96) — part of an IT/cybersecurity portfolio demonstrating blockchain scripting, API integration, and automated systems design.*
+*Built by [Dennis Saint](https://github.com/DSaint96) — part of an IT/cybersecurity portfolio demonstrating real-world Python automation and API integration.*
