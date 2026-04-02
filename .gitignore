@@ -1,0 +1,14 @@
+# Credentials & secrets — never commit these
+.env
+schwab_token.json
+Key.txt
+
+# Logs
+trader.log
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+__pycache__/
+*.pyc
